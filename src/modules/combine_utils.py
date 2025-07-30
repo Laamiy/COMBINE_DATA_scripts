@@ -73,8 +73,8 @@ def write_file(i : int,_output_directory : Path, _out_visibility_mat : np.ndarra
 #----------------------------- < Parse input data > ------------------------------#
 def get_data_per_file( data_path : str , n_files : int) -> Generator:
     dataset       = []
-    files         = [f for f in os.listdir(data_path) if os.path.isfile(f)] 
-    if n_files  > len(files): 
+    files         = [f for f in os.listdir(data_path) if os.path.isfile(os.path.join(data_path,f))] 
+    if (n_files  > len(files)): 
         Logger.fatal("Number of input_files exceeds the number of existing files")
         exit(-1)
     # Check if data_path contain files : exit if not
