@@ -141,10 +141,11 @@ def prune_files(path: Path)-> None :
             item.unlink()
 #---------------------------------------------------------------------------------------------#
 def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_infile )  -> None :     
-    ( input_path , output_path ,n_input_file , n_output_file , n_vertex , n_photo_detec_long  ) =  input_params
+    ( input_path , output_path ,n_input_file , n_output_file , _ , n_photo_detec_lateral  ) =  input_params
     path_2_data_        = input_path
     num_file_           = n_input_file
     n_output            = n_output_file
+    n_photo_detec_long  = n_photo_detec_lateral //4 
     # Path pointing to the output directory in order to store the ouput files of this script : Default or not . 
     output_directory    = Path(output_path).resolve()
     # Make sure to  create the output directory if it does not exist.
@@ -156,11 +157,11 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
     current_file_generator = get_data_per_file(path_2_data_, num_file_)
     for file in current_file_generator:
         dataset  = file
-        n_vec , n_sample = len(dataset) , 10_000 
+        n_vec , n_sample = len(dataset) , 6912 
         src_pos  = np.zeros( shape = (n_vec,3) ,  dtype  = np.float32)
         src_proba = np.zeros( shape = (n_vec, n_sample), dtype  = np.float32)
         Logger.debug(f"dataset loaded, dataset length: {str(n_vec)}")
-        Logger.debug(f"Dataset_memory_use : {sys.getsizeof(dataset)} MBytes")      
+        Logger.debug(f"Dataset_memory_use : {sys.getsizeof(dataset)} Bytes")      
         for i in range(n_vec):
             event : list[int]   = dataset[i] 
             if len(event) > const_params.valid_data_len : 
@@ -170,10 +171,15 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
 
         light_source_pos, ph_visibility = src_pos, src_proba 
         light_source_pos                = light_source_pos.reshape(-1,3)
-    # to store the output for furthe processing :
-    # out_visibility_mat  = np.zeros( shape = ( n_vertex , n_photo_detec_long + const_params.n_detector_short_side+ 3 )) 
-        out_visibility_mat  = np.zeros( shape = ( n_vertex ,( n_photo_detec_long // 2  )+ (const_params.n_detector_short_side //2) + 3 )) # (n_vertex , 720 + 288 + 3) 
-        sample_vector       = np.zeros(const_params.n_sample_per_infile + 3)
+        Logger.debug(f"light_source_pos shape : {light_source_pos.shape}")
+        Logger.debug(f"ph_visibility shape : {ph_visibility.shape}")
+
+        # to store the output for furthe processing :
+        # out_visibility_mat  = np.zeros( shape = ( n_vertex , n_photo_detec_long + const_params.n_detector_short_side+ 3 )) 
+        # Just for debugging  : 
+        n_vertex = ph_visibility.shape[0]
+        out_visibility_mat  = np.zeros( shape = ( n_vertex ,( n_photo_detec_long // 2  )+ (const_params.n_detector_short_side //4) + 3 )) # (n_vertex , 720 + 288 + 3) 
+        sample_vector       = np.zeros(( n_photo_detec_long // 2  )+ (const_params.n_detector_short_side //2) + 3 ) # (n_vertex , 720 + 288 + 3) )#(const_params.n_sample_per_infile + 3)
         Logger.info("concatenating each detector side readings ... ")
         # remove all files in the output directory : to avoid any confusion to existing files
         prune_files(path = output_directory)
@@ -182,12 +188,12 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
         for m in (range(n_vertex)):   
             temp =  ph_visibility[m].copy() 
             # number of total channel in the long part 
-            total_channel_vector       = temp[ 0 : n_photo_detec_long]      # should be (1 * 5760 ) -> meaning 1152 left
+            total_channel_vector       = temp[ 0 : n_photo_detec_lateral]      # should be (1 * 5760 ) -> meaning 1152 left
 
-            total_detec_len = n_photo_detec_long + const_params.n_detector_short_side
-            total_channel_short_vector = temp[ n_photo_detec_long : total_detec_len ] #!!!! should go from 5760 -> 5760 + 1152 
+            total_detec_len = n_photo_detec_lateral + const_params.n_detector_short_side
+            total_channel_short_vector = temp[ n_photo_detec_lateral : total_detec_len ] #!!!! should go from 5760 -> 5760 + 1152 
+
             total_channel_short_vector = total_channel_short_vector.reshape(1,-1)
-            
             unused_part = total_detec_len - len(temp) # 152 - 40 
             total_channel_short_vector = np.concatenate((total_channel_short_vector , np.zeros((1,unused_part))) , axis = 1) #!!! 112 left unused filled with 0s ! 
             total_channel_short_vector = np.squeeze(total_channel_short_vector)
@@ -222,13 +228,13 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
             #                                             ) # just [] + [] + [] every element. 
             sample_vector = np.concatenate([
                                             source_pos_temp,
-                                            top_right[ :, n_photo_detec_long//2: n_photo_detec_long], # 720  until 2*720 
+                                            top_right[ :, 720: 2*720], # 720  until 2*720 
                                             top_front
                                             ],
                                             axis =1
-                                        ) 
+                                        )
             sample_vector            = sample_vector.reshape(1,-1)
-
+            Logger.debug(f"sample_vector shape {sample_vector.shape} : , out_visibility_mat_shape : {out_visibility_mat[m,:].shape}")
             # handle incorrect value of n_ph_detector from user input : 
             try : 
                 out_visibility_mat[ m , : ] = sample_vector
