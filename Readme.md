@@ -7,13 +7,13 @@ This script processes simulation data files that represent photon visibility fro
 To run the script, use the following command format:
 
 ```bash
-python3 combine_utils.py -i <num_input_files> -o <num_output_files> --n-vertices <num_vertices> -p <input_directory> --out-path <output_directory> -n <num_photo_detectors>
+python3 run_combine_data.py -i <num_input_files> -o <num_output_files> --n-vertices <num_vertices> -p <input_directory> --out-path <output_directory> -n <num_photo_detectors>
 ```
 
 For example:
 
 ```bash
-python3 combine_utils.py -i 58 -o 936 --n-vertices 9360 -p ./dataset --out-path ./processed -n 5760
+python3 run_combine_data.py -i 58 -o 936 --n-vertices 9360 -p ./dataset --out-path ./processed -n 5760
 ```
 
 ## Arguments
@@ -30,16 +30,16 @@ python3 combine_utils.py -i 58 -o 936 --n-vertices 9360 -p ./dataset --out-path 
 Each input file should contain whitespace-separated rows of numerical values in the format:
 
 ```
-x y z p1 p2 p3 ... p100
+x y z p1 p2 p3 ... p6912
 ```
 
-Where `x y z` are the coordinates of a light source, and `p1` through `p100` represent photon visibility or detector hit probabilities.
+Where `x y z` are the coordinates of a light source, and `p1` through `p6912` represent photon visibility or detector hit probabilities.
 
 Input files are expected to be named in a consistent pattern (e.g., `file_0.txt`, `file_1.txt`, ..., `file_57.txt`) and will be automatically sorted numerically.
 
 ## Output
 
-The output will be a set of files named like `ph_0.txt`, `ph_1.txt`, etc., each containing a batch of 10 visibility entries by default. Each entry contains the light source position followed by a structured concatenation of detector readings, split and grouped based on their location (e.g., top right, bottom left, front, back).
+The output will be a set of files named like `ph_0.txt`, `ph_1.txt`, etc., each containing a batch of 1000 visibility entries by default. Each entry contains the light source position followed by a structured concatenation of detector readings, split and grouped based on their location (e.g., top right, bottom left, front, back).
 
 The script ensures that the output directory exists and clears any old files before writing new ones.
 

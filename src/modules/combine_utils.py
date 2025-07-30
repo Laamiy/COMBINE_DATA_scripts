@@ -65,10 +65,10 @@ def write_output_file(path : Path , index: int   , visibility_matrix : np.ndarra
     with open(path, 'w') as output_file:
         np.savetxt(output_file, visibility_matrix[ n_sample*index : index*n_sample + n_sample ,:], delimiter = ', ',fmt ='%1.5e')#1.3e')
 
-def write_file(i : int,_ooutput_directory : Path, _Out_visibility_mat : np.ndarray):
+def write_file(i : int,_output_directory : Path, _out_visibility_mat : np.ndarray , n_sample : int):
     file_signature = f'ph_{i}.txt'
-    file_path = _ooutput_directory / file_signature
-    write_output_file(file_path, i, _Out_visibility_mat)
+    file_path = _output_directory / file_signature
+    write_output_file(file_path, i, _out_visibility_mat, n_sample)
 
 #----------------------------- < Parse input data > ------------------------------#
 def get_data_per_file( data_path : str , n_files : int) -> Generator:
@@ -222,7 +222,7 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
             #                                             ) # just [] + [] + [] every element. 
             sample_vector = np.concatenate([
                                             source_pos_temp,
-                                            top_right[ :, n_photo_detec_long/2: n_photo_detec_long], # 720  until 2*720 
+                                            top_right[ :, n_photo_detec_long//2: n_photo_detec_long], # 720  until 2*720 
                                             top_front
                                             ],
                                             axis =1
@@ -235,13 +235,13 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
             except ValueError  as e : 
                 Logger.fatal(f" valueerror : could not broadcast input array from shape {out_visibility_mat[m,:].shape } into shape {sample_vector.shape}") 
                 exit(-1)
-            
+        n_sample_per_output = n_vec // 10
         # ----------- < multithreaded for writing to each file >------------------- :
         Logger.info(f"writing output files to : {output_directory}  ...")
         with concurrent.futures.ThreadPoolExecutor(max_workers = const_params.n_max_thread) as executor:
         # writes 10 rows per output file created , for ease of readability.
         # runs each call to  write_file in pseudo-prallel for fastere execution :
-            results = [ executor.submit( write_file , i, output_directory , out_visibility_mat ) for i in range(n_output) ]  
+            results = [ executor.submit( write_file , i, output_directory , out_visibility_mat ,n_sample_per_output) for i in range(n_output) ]  
         # join every thread to the main thread
             try : 
                 for f in concurrent.futures.as_completed(results):                      
@@ -251,7 +251,6 @@ def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_
                 exit(-1)
             #----------------------------------------------------------------------
         Logger.debug(f"out_visibility_mat shape : {out_visibility_mat.shape} ( n_vertex x (3 + n_ph_detector) )")
-        # return (out_visibility_mat , top_right, bottom_right, top_left, bottom_left ) 
 
 
 
