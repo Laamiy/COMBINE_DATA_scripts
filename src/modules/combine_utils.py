@@ -5,18 +5,17 @@ import csv
 import numpy as np 
 from pathlib import Path
 import concurrent.futures
-from typing import Tuple , List
+from typing import Generator, Tuple 
 from dataclasses import dataclass
 from .combine_log_config import Logger
-
 # Group const values in one dataclass  : 
 @dataclass(frozen = True)
 class const_params() :
     n_sample_per_output   = 10                                        # number of light sources per output file.
-    num_file              = 58                                          # Default number of input files. 
+    num_file              = 35#58                                      # Default number of input files. 
     n_VERTEX              = 9360                                         # Default number of light sources (vertex)  # 9360
     n_output_file         = n_VERTEX // n_sample_per_output               # Default number of output files # 936
-    n_sample_per_infile   = 100                                            # Number of probability values of a photon hitting a detector.
+    n_sample_per_infile   = 6912                                            # Number of probability values of a photon hitting a detector.
     #---------------------------------------
     n_max_thread          = 4                                              # For mutithreaded outuput file writing at the end of the script.
     n_FILES               = num_file                                      # Number of files in the current dataset.
@@ -24,7 +23,7 @@ class const_params() :
     n_Detector_perside    = n_Detector // 4  # 1440                     # Number of detector on each lateral side  and with respect to  the cathode
     max_args              = 13                                         # Number of maximum argument for usage error detection purposes.
     n_detector_short_side = 1152
-    Valid_data_len        = 103
+    valid_data_len        = 6915
 #---------------------------- < List and array slices > ----------------------------#
 # Combine index position every step
 def list_slice(S : np.ndarray , step : int ) -> list : 
@@ -66,13 +65,13 @@ def write_output_file(path : Path , index: int   , visibility_matrix : np.ndarra
     with open(path, 'w') as output_file:
         np.savetxt(output_file, visibility_matrix[ n_sample*index : index*n_sample + n_sample ,:], delimiter = ', ',fmt ='%1.5e')#1.3e')
 
-def write_file(i : int,_Output_directory : Path, _Out_visibility_mat : np.ndarray):
-    file_name = f'ph_{i}.txt'
-    file_path = _Output_directory / file_name
+def write_file(i : int,_ooutput_directory : Path, _Out_visibility_mat : np.ndarray):
+    file_signature = f'ph_{i}.txt'
+    file_path = _ooutput_directory / file_signature
     write_output_file(file_path, i, _Out_visibility_mat)
 
 #----------------------------- < Parse input data > ------------------------------#
-def get_data( data_path : str , n_files : int  , n_sample = const_params.n_sample_per_infile) -> Tuple[np.ndarray, np.ndarray] :
+def get_data_per_file( data_path : str , n_files : int) -> Generator:
     dataset       = []
     files         = [f for f in os.listdir(data_path) if os.path.isfile(f)] 
     if n_files  > len(files): 
@@ -98,22 +97,10 @@ def get_data( data_path : str , n_files : int  , n_sample = const_params.n_sampl
                 row = [float(number) for number in row]
                 dataset.append(row)
                 
-                
-    n_vec : int   = len(dataset)
-    # Separates the light source position and the visibility matrix into two matrices :
-    Inputs  = np.zeros( shape = (n_vec, 3) ,  dtype  = np.float32)
-    Outputs = np.zeros( shape = (n_vec, n_sample), dtype  = np.float32)
-    Logger.debug(f"Dataset loaded, dataset length: {str(n_vec)}")
-    
-    for i in (range(n_vec)):
-        event : List[int]   = dataset[i] 
-        if len(event) > const_params.Valid_data_len : 
-            event = event[: len(event) -1] ### !!! Temporary fix  :
-        Inputs[i,:]         = event[:3]
-        Outputs[i]          = event[3:]
-        
-    return (Inputs, Outputs)
-#----------------------------- < handles user-input  > ------------------------------#
+        yield dataset 
+        dataset.clear()
+
+ #----------------------------- < handles user-input  > ------------------------------#
 
 def handle_input(n_argmax = const_params.max_args)-> list :
     path_check = False
@@ -153,105 +140,119 @@ def prune_files(path: Path)-> None :
         if item.is_file() : 
             item.unlink()
 #---------------------------------------------------------------------------------------------#
-def process_combine(input_params : list )  -> None :     
-    ( input_path , output_path ,n_input_file , n_output_file , n_vertex , n_Photo_detec_long  ) =  input_params
+def process_combine(input_params : list ,  n_sample = const_params.n_sample_per_infile )  -> None :     
+    ( input_path , output_path ,n_input_file , n_output_file , n_vertex , n_photo_detec_long  ) =  input_params
     path_2_data_        = input_path
     num_file_           = n_input_file
     n_output            = n_output_file
     # Path pointing to the output directory in order to store the ouput files of this script : Default or not . 
-    Output_directory    = Path(output_path).resolve()
+    output_directory    = Path(output_path).resolve()
     # Make sure to  create the output directory if it does not exist.
-    Output_directory.mkdir(parents = True , exist_ok = True)                
+    output_directory.mkdir(parents = True , exist_ok = True)                
     
     ph_visibility       = [] # Visibility. 
     temp                = [] # for temporary storage.
     # Get the light source position and the visibility matrix from the data files :
-    light_source_pos, ph_visibility = get_data(path_2_data_, num_file_)
-    light_source_pos                = light_source_pos.reshape(-1,3)
+    current_file_generator = get_data_per_file(path_2_data_, num_file_)
+    for file in current_file_generator:
+        dataset  = file
+        n_vec , n_sample = len(dataset) , 10_000 
+        src_pos  = np.zeros( shape = (n_vec,3) ,  dtype  = np.float32)
+        src_proba = np.zeros( shape = (n_vec, n_sample), dtype  = np.float32)
+        Logger.debug(f"dataset loaded, dataset length: {str(n_vec)}")
+        Logger.debug(f"Dataset_memory_use : {sys.getsizeof(dataset)} MBytes")      
+        for i in range(n_vec):
+            event : list[int]   = dataset[i] 
+            if len(event) > const_params.valid_data_len : 
+                event = event[: len(event) -1] ### !!! temporary fix  :
+                src_pos[i,:]         = event[:3]
+                src_proba[i]         = event[3:]
+
+        light_source_pos, ph_visibility = src_pos, src_proba 
+        light_source_pos                = light_source_pos.reshape(-1,3)
+    # to store the output for furthe processing :
+    # out_visibility_mat  = np.zeros( shape = ( n_vertex , n_photo_detec_long + const_params.n_detector_short_side+ 3 )) 
+        out_visibility_mat  = np.zeros( shape = ( n_vertex ,( n_photo_detec_long // 2  )+ (const_params.n_detector_short_side //2) + 3 )) # (n_vertex , 720 + 288 + 3) 
+        sample_vector       = np.zeros(const_params.n_sample_per_infile + 3)
+        Logger.info("concatenating each detector side readings ... ")
+        # remove all files in the output directory : to avoid any confusion to existing files
+        prune_files(path = output_directory)
+        # detector short lateral side : 
+        temp  = None
+        for m in (range(n_vertex)):   
+            temp =  ph_visibility[m].copy() 
+            # number of total channel in the long part 
+            total_channel_vector       = temp[ 0 : n_photo_detec_long]      # should be (1 * 5760 ) -> meaning 1152 left
+
+            total_detec_len = n_photo_detec_long + const_params.n_detector_short_side
+            total_channel_short_vector = temp[ n_photo_detec_long : total_detec_len ] #!!!! should go from 5760 -> 5760 + 1152 
+            total_channel_short_vector = total_channel_short_vector.reshape(1,-1)
+            
+            unused_part = total_detec_len - len(temp) # 152 - 40 
+            total_channel_short_vector = np.concatenate((total_channel_short_vector , np.zeros((1,unused_part))) , axis = 1) #!!! 112 left unused filled with 0s ! 
+            total_channel_short_vector = np.squeeze(total_channel_short_vector)
+            
+            ## split into 2 right and left side
+            detec_right_side , detec_left_side = array_slice(total_channel_vector,2)
+            ## split into 2 front and back side
+            detec_front_side , detec_back_side = array_slice(total_channel_short_vector,2)
+            ## split into top and bottom part 
+                # front side of the detector : 
+            bottom_front , top_front = make_bunches(detector_side = detec_front_side , reverse = False) # bunch of 12 elements
+                # back side of the detector  : 
+            bottom_back  , top_back  = make_bunches(detector_side = detec_back_side  , reverse = False) # bunch of 12 elements
+                # right side of the detector : 
+            bottom_right , top_right = make_bunches(detector_side = detec_right_side )   # bunch of 12 elements
+                # left side of the detector  : 
+            bottom_left , top_left   = make_bunches(detector_side = detec_left_side)     # bunch of 12 elements
     
-    # To store the output for furthe processing :
-    # Out_visibility_mat  = np.zeros( shape = ( n_vertex , n_Photo_detec_long + const_params.n_detector_short_side+ 3 )) 
-    Out_visibility_mat  = np.zeros( shape = ( n_vertex ,( n_Photo_detec_long // 2  )+ (const_params.n_detector_short_side //2) + 3 )) # (n_vertex , 720 + 288 + 3) 
-    sample_vector       = np.zeros(const_params.n_sample_per_infile + 3)
-    Logger.info("Concatenating each detector side readings ... ")
-    # Remove all files in the output directory : To avoid any confusion to existing files
-    prune_files(path = Output_directory)
-    # DETECTOR SHORT LATERAL SIDE : 
-    temp  = None
-    for m in (range(n_vertex)):   
-        temp =  ph_visibility[m].copy() 
-        # Number of total channel in the long part 
-        total_channel_vector       = temp[ 0 : n_Photo_detec_long]      # should be (1 * 5760 ) -> Meaning 1152 left
 
-        total_detec_len = n_Photo_detec_long + const_params.n_detector_short_side
-        total_channel_short_vector = temp[ n_Photo_detec_long : total_detec_len ] #!!!! should go from 5760 -> 5760 + 1152 
-        total_channel_short_vector = total_channel_short_vector.reshape(1,-1)
+            # concatenate each part in the following order :  ( top_right - bottom_right - top_left - bottom_left )
+            source_pos_temp          = np.expand_dims( light_source_pos[m,:], axis = 0)
+            # sample_vector            = np.concatenate((     source_pos_temp,
+            #                                                 top_right, 
+            #                                                 bottom_right,
+            #                                                 top_left,
+            #                                                 bottom_left,
+            #                                                 top_front, 
+            #                                                 bottom_front,
+            #                                                 top_back,
+            #                                                 bottom_back),
+            #                                                 axis = 1
+            #                                             ) # just [] + [] + [] every element. 
+            sample_vector = np.concatenate([
+                                            source_pos_temp,
+                                            top_right[ :, n_photo_detec_long/2: n_photo_detec_long], # 720  until 2*720 
+                                            top_front
+                                            ],
+                                            axis =1
+                                        ) 
+            sample_vector            = sample_vector.reshape(1,-1)
+
+            # handle incorrect value of n_ph_detector from user input : 
+            try : 
+                out_visibility_mat[ m , : ] = sample_vector
+            except ValueError  as e : 
+                Logger.fatal(f" valueerror : could not broadcast input array from shape {out_visibility_mat[m,:].shape } into shape {sample_vector.shape}") 
+                exit(-1)
+            
+        # ----------- < multithreaded for writing to each file >------------------- :
+        Logger.info(f"writing output files to : {output_directory}  ...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers = const_params.n_max_thread) as executor:
+        # writes 10 rows per output file created , for ease of readability.
+        # runs each call to  write_file in pseudo-prallel for fastere execution :
+            results = [ executor.submit( write_file , i, output_directory , out_visibility_mat ) for i in range(n_output) ]  
+        # join every thread to the main thread
+            try : 
+                for f in concurrent.futures.as_completed(results):                      
+                    f.result()
+            except Exception as e : 
+                Logger.error(f"error in writing output files : {e}")
+                exit(-1)
+            #----------------------------------------------------------------------
+        Logger.debug(f"out_visibility_mat shape : {out_visibility_mat.shape} ( n_vertex x (3 + n_ph_detector) )")
+        # return (out_visibility_mat , top_right, bottom_right, top_left, bottom_left ) 
+
+
+
         
-        unused_part = total_detec_len - len(temp) # 152 - 40 
-        total_channel_short_vector = np.concatenate((total_channel_short_vector , np.zeros((1,unused_part))) , axis = 1) #!!! 112 left unused filled with 0s ! 
-        total_channel_short_vector = np.squeeze(total_channel_short_vector)
-        
-        ## Split into 2 right and left side
-        detec_right_side , detec_left_side = array_slice(total_channel_vector,2)
-        ## Split into 2 front and back side
-        detec_front_side , detec_back_side = array_slice(total_channel_short_vector,2)
-        ## Split into top and bottom part 
-            # Front side of the detector : 
-        bottom_front , top_front = make_bunches(detector_side = detec_front_side , reverse = False) # Bunch of 12 elements
-            # Back side of the detector  : 
-        bottom_back  , top_back  = make_bunches(detector_side = detec_back_side  , reverse = False) # Bunch of 12 elements
-            # Right side of the detector : 
-        bottom_right , top_right = make_bunches(detector_side = detec_right_side )   # Bunch of 12 elements
-            # Left side of the detector  : 
-        bottom_left , top_left   = make_bunches(detector_side = detec_left_side)     # Bunch of 12 elements
-   
-
-        # Concatenate each part in the following order :  ( top_right - bottom_right - top_left - bottom_left )
-        source_pos_temp          = np.expand_dims( light_source_pos[m,:], axis = 0)
-        # sample_vector            = np.concatenate((     source_pos_temp,
-        #                                                 top_right, 
-        #                                                 bottom_right,
-        #                                                 top_left,
-        #                                                 bottom_left,
-        #                                                 top_front, 
-        #                                                 bottom_front,
-        #                                                 top_back,
-        #                                                 bottom_back),
-        #                                                 axis = 1
-        #                                             ) # just [] + [] + [] every element. 
-        sample_vector = np.concatenate([
-                                        source_pos_temp,
-                                        top_right[ :, n_Photo_detec_long/2: n_Photo_detec_long], # 720  until 2*720 
-                                        top_front
-                                        ],
-                                        axis =1
-                                       ) 
-        sample_vector            = sample_vector.reshape(1,-1)
-
-        # Handle incorrect value of n_ph_detector from user input : 
-        try : 
-            Out_visibility_mat[ m , : ] = sample_vector
-        except ValueError as e : 
-            Logger.fatal(f" ValueError : could not broadcast input array from shape {Out_visibility_mat[m,:].shape } into shape {sample_vector.shape}") 
-            exit(-1)
-        
-    # ----------- < Multithreaded for writing to each file >------------------- :
-    Logger.info(f"Writing output files to : {Output_directory}  ...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers = const_params.n_max_thread) as executor:
-    # Writes 10 rows per output file created , for ease of readability.
-    # Runs each call to  write_file in pseudo-prallel for fastere execution :
-        results = [ executor.submit( write_file , i, Output_directory , Out_visibility_mat ) for i in range(n_output) ]  
-    # Join every thread to the main thread
-        try : 
-            for f in concurrent.futures.as_completed(results):                      
-                f.result()
-        except Exception as e : 
-            Logger.error(f"Error in writing output files : {e}")
-            exit(-1)
-        #----------------------------------------------------------------------
-    Logger.debug(f"Out_visibility_mat shape : {Out_visibility_mat.shape} ( n_vertex X (3 + n_ph_detector) )")
-    # return (Out_visibility_mat , TOP_RIGHT, BOTTOM_RIGHT, TOP_LEFT, BOTTOM_LEFT ) 
-
-
-
-    
